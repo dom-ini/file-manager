@@ -844,6 +844,7 @@ class FileManager(QMainWindow):
         msgBox = QMessageBox()
         msgBox.setWindowTitle("Confirm delete")
         msgBox.setIcon(QMessageBox.Warning)
+        msgBox.setWindowIcon(QIcon(':delete.png'))
         filename = files[0].data() if len(files) == 1 else None
         msgText = f"Are you sure to delete '{filename}'?" if filename else f"Are you sure to delete {len(files)} items?"
         msgBox.setText(msgText)
