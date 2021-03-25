@@ -1,14 +1,17 @@
 # file-manager
-Simple file manager built with PyQt5. Python 3.8.3.
+Simple file manager built with PyQt5. Python 3.8.3. Tested on Windows and Linux.
+
+# Dependencies
+The required libraries are: PyQt5, pyperclip and (if using Windows) pywin32.
 
 # Main Features
-- creating new files and directories
-- navigation: step back, step forward and directory up
-- copy, copy as path, cut, paste, rename, delete
-- bulk renamer for files
-- sorting by chosen column
-- filtering files and directories4
-- drag and drop mode for moving files
+- Creating new files and directories,
+- Navigation: step back, step forward and directory up,
+- Copy, copy as path, cut, paste, rename, delete,
+- Bulk renamer for files,
+- Sorting by chosen column,
+- Filtering files and directories,
+- Drag and drop mode for moving files.
 
 ### Directory creating
 <img src='gifs/file_tab.gif' width=600px>
