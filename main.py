@@ -4,7 +4,7 @@ import shutil
 import sys
 import os
 
-from typing import List, Union
+from typing import List, Union, Any, Tuple, Optional
 from distutils import dir_util
 from collections import deque
 from pathlib import Path
@@ -20,7 +20,7 @@ if os.name == 'nt':
     import pywintypes
 
 
-class CustTreeView(QTreeView):
+class CustomTreeView(QTreeView):
     """
     Custom class for PyQt TreeView
     """
@@ -33,10 +33,10 @@ class CustTreeView(QTreeView):
         if (QApplication.mouseButtons() == Qt.LeftButton and not self.indexAt(e.pos()).siblingAtColumn(0).data()) \
                 or colPos == 4:
             self.setDragEnabled(False)
-            self.origin = QPoint(e.pos().x(), e.pos().y() + self.header().height())
-            self.rubberBand = QRubberBand(QRubberBand.Rectangle, self)
-            self.rubberBand.setGeometry(QRect(self.origin, QSize()))
-            self.rubberBand.show()
+            self._origin = QPoint(e.pos().x(), e.pos().y() + self.header().height())
+            self._rubberBand = QRubberBand(QRubberBand.Rectangle, self)
+            self._rubberBand.setGeometry(QRect(self._origin, QSize()))
+            self._rubberBand.show()
         editor = self.indexWidget(self.currentIndex().siblingAtColumn(0))
 
         # if editor of any item is opened, close it on mouse click
@@ -49,22 +49,22 @@ class CustTreeView(QTreeView):
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         ctrlPressed = QApplication.keyboardModifiers() == Qt.ControlModifier
         mouseOverItem = bool(self.indexAt(e.pos()).siblingAtColumn(0).data())
-        originOverItem = bool(hasattr(self, 'origin') and self.indexAt(self.origin).siblingAtColumn(0).data())
+        originOverItem = bool(hasattr(self, '_origin') and self.indexAt(self._origin).siblingAtColumn(0).data())
 
         # clears selection if box selection doesn't contain any item and CTRL is not pressed
         if not ctrlPressed and ((not mouseOverItem and e.pos().y() > 0) and not originOverItem):
             self.clearSelection()
 
         # update box selection position
-        if QApplication.mouseButtons() == Qt.LeftButton and hasattr(self, 'rubberBand'):
+        if QApplication.mouseButtons() == Qt.LeftButton and hasattr(self, '_rubberBand'):
             pos = QPoint(e.pos().x(), max(e.pos().y() + self.header().height(), self.header().height()))
-            self.rubberBand.setGeometry(QRect(self.origin, pos).normalized())
+            self._rubberBand.setGeometry(QRect(self._origin, pos).normalized())
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e: QMouseEvent) -> None:
         self.setDragEnabled(True)
-        if hasattr(self, 'rubberBand'):
-            self.rubberBand.hide()
+        if hasattr(self, '_rubberBand'):
+            self._rubberBand.hide()
         super().mouseReleaseEvent(e)
 
     def startDrag(self, supportedActions: Union[Qt.DropActions, Qt.DropAction]) -> None:
@@ -79,142 +79,211 @@ class CustTreeView(QTreeView):
 
 class FileManager(QMainWindow):
     """
-    Custom class for PyQt MainWindow
+    Custom class for PyQt MainWindow, GUI file manager
     """
-    def __init__(self, flags=None):
-        super().__init__(flags=flags)
+    def __init__(self):
+        super().__init__()
         self.setWindowTitle('File Manager')
         self.setWindowIcon(QIcon(':folder.png'))
         self.setMinimumSize(800, 600)
         self.setGeometry(0, 0, 1050, 768)
 
-        self.SIZES_SUFF = {
+        self._SIZES_SUFFIX = {
             0: 'B',
             1: 'KB',
             2: 'MB',
             3: 'GB',
-            4: 'TB',
-        }
+            4: 'TB', }
 
-        self.fileClipboard = []
+        # list for storing paths of files to be copied/cut
+        self._fileClipboard = []
 
-        self.currPath = Path.home()
+        # initial path for file manager
+        self._currPath = Path.home()
 
-        self.pathStack = deque(maxlen=20)
-        self.stackIndex = -1
-        self.pathStack.append(self.currPath)
+        # stack for storing previously visited directories, enables the back and forward buttons functionality
+        self._pathStack = deque(maxlen=20)
+        self._stackIndex = -1
+        self._pathStack.append(self._currPath)
 
-        self.mainLayout = QVBoxLayout()
-        self.secLayout = QHBoxLayout()
+        self._createLayout()
+        self._initUI()
+        self._connectSignals()
 
-        self.sideLayout = QVBoxLayout()
-        self.documentsButton = QPushButton('Go to Documents')
-        self.desktopButton = QPushButton()
-        self.desktopButton = QPushButton('Go to Desktop')
-        self.sideFileView = QTreeView()
-        self.sideFileView.setFixedWidth(250)
-        self.sideModel = QFileSystemModel()
-        self.sideModel.setRootPath(str(self.currPath))
-        self.sideFileView.setModel(self.sideModel)
+        self._listDirectories()
+
+    def _createLayout(self) -> None:
+        """
+        Creates main window layout
+        """
+        # layouts
+        self._mainLayout = QVBoxLayout()
+        self._fileViewLayout = QHBoxLayout()
+        self._sideFileLayout = QVBoxLayout()
+        self._addressBarLayout = QHBoxLayout()
+
+        # side file view
+        self._documentsButton = QPushButton('Go to Documents')
+        self._desktopButton = QPushButton('Go to Desktop')
+        self._sideFileView = QTreeView()
+        self._sideFileView.setFixedWidth(250)
+        self._sideModel = QFileSystemModel()
+        self._sideModel.setRootPath(str(self._currPath))
+        self._sideFileView.setModel(self._sideModel)
         for i in range(1, 4):
-            self.sideFileView.hideColumn(i)
-        self.sideFileView.setHeaderHidden(True)
-        self.sideFileView.setFont(QFont('Consolas'))
-        self.sideModel.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot)
-        self.sideLayout.addWidget(self.documentsButton)
-        self.sideLayout.addWidget(self.desktopButton)
-        self.sideLayout.addWidget(self.sideFileView)
-        self.secLayout.addLayout(self.sideLayout)
+            self._sideFileView.hideColumn(i)  # leave only directory names on the side file view
+        self._sideFileView.setHeaderHidden(True)
+        self._sideFileView.setFont(QFont('Consolas'))
+        self._sideModel.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot)
+        self._sideFileLayout.addWidget(self._documentsButton)
+        self._sideFileLayout.addWidget(self._desktopButton)
+        self._sideFileLayout.addWidget(self._sideFileView)
+        self._fileViewLayout.addLayout(self._sideFileLayout)
 
-        self.mainFileView = CustTreeView()
-        self.mainFileView.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.mainFileView.setAlternatingRowColors(True)
-        self.mainFileView.setSortingEnabled(True)
-        self.mainFileView.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.model = QStandardItemModel()
-        self.modelHeaders = ['Filename', 'Type', 'Modified On', 'Size', '']
-        self.mainFileView.setModel(self.model)
-        self.mainFileView.setFont(QFont('Consolas'))
-        self.mainFileView.setRootIsDecorated(False)
-        self.mainFileView.setItemsExpandable(False)
-        self.mainFileView.setDragEnabled(True)
-        self.mainFileView.setAcceptDrops(True)
-        self.mainFileView.setDropIndicatorShown(True)
-        self.mainFileView.header().setFirstSectionMovable(True)
-        self.mainFileView.setFocusPolicy(Qt.NoFocus)
-        self.secLayout.addWidget(self.mainFileView)
+        # central file view
+        self._mainFileView = CustomTreeView()
+        self._mainFileView.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._mainFileView.setAlternatingRowColors(True)
+        self._mainFileView.setSortingEnabled(True)
+        self._mainFileView.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self._model = QStandardItemModel()
+        self._modelHeaders = ['Filename', 'Type', 'Modified On', 'Size', '']
+        self._mainFileView.setModel(self._model)
+        self._mainFileView.setFont(QFont('Consolas'))
+        self._mainFileView.setRootIsDecorated(False)
+        self._mainFileView.setItemsExpandable(False)
+        self._mainFileView.setDragEnabled(True)
+        self._mainFileView.setAcceptDrops(True)
+        self._mainFileView.setDropIndicatorShown(True)
+        self._mainFileView.header().setFirstSectionMovable(True)
+        self._mainFileView.setFocusPolicy(Qt.NoFocus)
+        self._fileViewLayout.addWidget(self._mainFileView)
 
-        self.addressBarLayout = QHBoxLayout()
-        self.goBackBtn = QToolButton()
-        self.goUpBtn = QToolButton()
-        self.goForwardBtn = QToolButton()
-        self.addressBarLayout.addWidget(self.goBackBtn)
-        self.addressBarLayout.addWidget(self.goUpBtn)
-        self.addressBarLayout.addWidget(self.goForwardBtn)
-        self.addressBar = QLineEdit()
-        self.addressBarLayout.addWidget(self.addressBar)
-        self.mainLayout.addLayout(self.addressBarLayout)
-        self.mainLayout.addLayout(self.secLayout)
+        # navigation buttons
+        self._goBackBtn = QToolButton()
+        self._goUpBtn = QToolButton()
+        self._goForwardBtn = QToolButton()
+        self._addressBarLayout.addWidget(self._goBackBtn)
+        self._addressBarLayout.addWidget(self._goUpBtn)
+        self._addressBarLayout.addWidget(self._goForwardBtn)
 
-        self.centralWidget = QWidget()
-        self.centralWidget.setLayout(self.mainLayout)
-        self.setCentralWidget(self.centralWidget)
-        self.initUI()
-        self.connectSignals()
+        # address bar
+        self._addressBar = QLineEdit()
+        self._addressBarLayout.addWidget(self._addressBar)
+        self._mainLayout.addLayout(self._addressBarLayout)
+        self._mainLayout.addLayout(self._fileViewLayout)
 
-        self.listDirectories()
+        # main parent widget
+        self._centralWidget = QWidget()
+        self._centralWidget.setLayout(self._mainLayout)
+        self.setCentralWidget(self._centralWidget)
 
-    def initUI(self):
-        self.createActions()
-        self.addActionsToMoveButtons()
-        self.createToolBar()
-        self.createStatusBar()
-        self.createMainContextMenu()
+    def _initUI(self) -> None:
+        """
+        Builds additional main window elements and creates actions
+        """
+        self._createActions()
+        self._addActionsToMoveButtons()
+        self._createToolBar()
+        self._createStatusBar()
+        self._createMainContextMenu()
 
-    def addActionsToMoveButtons(self):
-        self.goBackBtn.setDefaultAction(self.goBackAction)
-        self.goUpBtn.setDefaultAction(self.goUpAction)
-        self.goForwardBtn.setDefaultAction(self.goForwardAction)
+    def _createActions(self) -> None:
+        """
+        Creates action buttons
+        """
+        # actions for File tab
+        self._openAction = QAction(QIcon(":open.png"), '&Open', self)
+        self._newFileAction = QAction(QIcon(":new_file.png"), '&New File', self)
+        self._newFolderAction = QAction(QIcon(":new_folder.png"), '&New Folder', self)
+        self._exitAction = QAction(QIcon(":exit.png"), '&Exit', self)
 
-    def updateMainFileView(self):
-        self.model.setHorizontalHeaderLabels(self.modelHeaders)
-        self.mainFileView.setColumnWidth(0, 250)
-        self.mainFileView.setColumnWidth(2, 150)
-        self.mainFileView.resizeColumnToContents(4)
+        # actions for Edit tab
+        self._copyFileAction = QAction(QIcon(":copy_file.png"), '&Copy', self)
+        self._copyPathAction = QAction(QIcon(":copy_path.png"), '&Copy Path', self)
+        self._pasteFileAction = QAction(QIcon(":paste.png"), '&Paste', self)
+        self._cutAction = QAction(QIcon(":cut.png"), '&Cut', self)
+        self._renameAction = QAction(QIcon(":rename.png"), '&Rename', self)
+        self._bulkRenameAction = QAction(QIcon(":bulk_rename.png"), '&Bulk Rename...', self)
+        self._deleteAction = QAction(QIcon(":delete.png"), '&Delete', self)
 
-    def createToolBar(self):
+        # actions for View tab
+        self._refreshAction = QAction(QIcon(':refresh.png'), '&Refresh', self)
+        self._sortAction = QAction(QIcon(':sort.png'), '&Sort...', self)
+
+        # actions for navigation buttons
+        self._goUpAction = QAction(QIcon(':go_up.png'), '&Go Up', self)
+        self._goBackAction = QAction(QIcon(':go_back.png'), '&Back', self)
+        self._goForwardAction = QAction(QIcon(':go_forward.png'), '&Forward', self)
+
+        self._moveActions = [self._goUpAction, self._goBackAction, self._goForwardAction]
+        self._fileActions = [self._openAction, self._newFileAction, self._newFolderAction, self._exitAction]
+        self._editActions = [self._copyFileAction, self._copyPathAction, self._cutAction, self._pasteFileAction,
+                             self._renameAction, self._bulkRenameAction, self._deleteAction]
+        self._viewActions = [self._refreshAction, self._sortAction]
+
+        self._pasteFileAction.setEnabled(False)
+
+        # keyboard shortcuts for actions
+        self._openAction.setShortcut('Enter')
+        self._newFileAction.setShortcut('Ctrl+N')
+        self._newFolderAction.setShortcut('Ctrl+Shift+N')
+        self._exitAction.setShortcut('Ctrl+Q')
+        self._copyFileAction.setShortcut('Ctrl+C')
+        self._copyPathAction.setShortcut('Ctrl+Shift+C')
+        self._cutAction.setShortcut('Ctrl+X')
+        self._pasteFileAction.setShortcut('Ctrl+V')
+        self._renameAction.setShortcut('F2')
+        self._deleteAction.setShortcut('Delete')
+        self._refreshAction.setShortcut('F5')
+
+    def _addActionsToMoveButtons(self) -> None:
+        """
+        Sets up actions for navigation buttons
+        """
+        self._goBackBtn.setDefaultAction(self._goBackAction)
+        self._goUpBtn.setDefaultAction(self._goUpAction)
+        self._goForwardBtn.setDefaultAction(self._goForwardAction)
+
+    def _createToolBar(self) -> None:
+        """
+        Creates tabbed toolbar (pseudo-ribbon)
+        """
         toolsToolBar = QToolBar()
         self.addToolBar(Qt.TopToolBarArea, toolsToolBar)
         toolsToolBar.setMovable(False)
         iconSize = QSize(50, 50)
 
         tabs = QTabWidget()
+
         fileTab = QToolBar()
         fileTab.setIconSize(iconSize)
         fileTab.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        for action in self._fileActions:
+            fileTab.addAction(action)
+
         editTab = QToolBar()
         editTab.setIconSize(iconSize)
         editTab.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        for action in self._editActions:
+            editTab.addAction(action)
+
         viewTab = QToolBar()
         viewTab.setIconSize(iconSize)
         viewTab.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-
-        for action in self.fileActions:
-            fileTab.addAction(action)
-        for action in self.editActions:
-            editTab.addAction(action)
-        for action in self.viewActions:
+        for action in self._viewActions:
             viewTab.addAction(action)
 
+        # widget for filtering files and directories in the current path
+        filterLayout = QHBoxLayout()
+        filterLayout.setAlignment(Qt.AlignLeft)
         filterWidget = QWidget()
         filterLabel = QLabel('Filter:')
         filterLabel.setFixedWidth(filterLabel.fontMetrics().boundingRect(filterLabel.text()).width())
-        filterLayout = QHBoxLayout()
-        filterLayout.setAlignment(Qt.AlignLeft)
-        self.filterField = QLineEdit()
-        self.filterField.setFixedWidth(200)
+        self._filterField = QLineEdit()
+        self._filterField.setFixedWidth(200)
         filterLayout.addWidget(filterLabel)
-        filterLayout.addWidget(self.filterField)
+        filterLayout.addWidget(self._filterField)
         filterWidget.setLayout(filterLayout)
         viewTab.addSeparator()
         viewTab.addWidget(filterWidget)
@@ -224,118 +293,442 @@ class FileManager(QMainWindow):
         tabs.addTab(viewTab, 'View')
         toolsToolBar.addWidget(tabs)
 
-    def createActions(self):
-        self.openAction = QAction(QIcon(":open.png"), '&Open', self)
-        self.newFileAction = QAction(QIcon(":new_file.png"), '&New File', self)
-        self.newFolderAction = QAction(QIcon(":new_folder.png"), '&New Folder', self)
-        self.exitAction = QAction(QIcon(":exit.png"), '&Exit', self)
+    def _createStatusBar(self) -> None:
+        """
+        Sets up the status bar
+        """
+        self._statusBar = QStatusBar()
+        self.setStatusBar(self._statusBar)
 
-        self.copyFileAction = QAction(QIcon(":copy_file.png"), '&Copy', self)
-        self.copyPathAction = QAction(QIcon(":copy_path.png"), '&Copy Path', self)
-        self.pasteFileAction = QAction(QIcon(":paste.png"), '&Paste', self)
-        self.cutAction = QAction(QIcon(":cut.png"), '&Cut', self)
-        self.renameAction = QAction(QIcon(":rename.png"), '&Rename', self)
-        self.bulkRenameAction = QAction(QIcon(":bulk_rename.png"), '&Bulk Rename...', self)
-        self.deleteAction = QAction(QIcon(":delete.png"), '&Delete', self)
-
-        self.refreshAction = QAction(QIcon(':refresh.png'), '&Refresh', self)
-        self.sortAction = QAction(QIcon(':sort.png'), '&Sort...', self)
-
-        self.goUpAction = QAction(QIcon(':go_up.png'), '&Go Up', self)
-        self.goBackAction = QAction(QIcon(':go_back.png'), '&Back', self)
-        self.goForwardAction = QAction(QIcon(':go_forward.png'), '&Forward', self)
-
-        self.moveActions = [self.goUpAction, self.goBackAction, self.goForwardAction]
-        self.fileActions = [self.openAction, self.newFileAction, self.newFolderAction, self.exitAction]
-        self.editActions = [self.copyFileAction, self.copyPathAction, self.pasteFileAction, self.cutAction,
-                            self.renameAction, self.bulkRenameAction, self.deleteAction]
-        self.viewActions = [self.refreshAction, self.sortAction]
-
-        self.pasteFileAction.setEnabled(False)
-
-        self.openAction.setShortcut('Enter')
-        self.newFileAction.setShortcut('Ctrl+N')
-        self.newFolderAction.setShortcut('Ctrl+Shift+N')
-        self.exitAction.setShortcut('Ctrl+Q')
-        self.copyFileAction.setShortcut('Ctrl+C')
-        self.copyPathAction.setShortcut('Ctrl+Shift+C')
-        self.cutAction.setShortcut('Ctrl+X')
-        self.pasteFileAction.setShortcut('Ctrl+V')
-        self.renameAction.setShortcut('F2')
-        self.deleteAction.setShortcut('Delete')
-        self.refreshAction.setShortcut('F5')
-
-    def createStatusBar(self):
-        self.statusBar = QStatusBar()
-        self.setStatusBar(self.statusBar)
-
-    def createMainContextMenu(self):
+    def _createMainContextMenu(self) -> None:
+        """
+        Creates right-click menu for main file view
+        """
+        # separators for improved readability
         separator1 = QAction(self)
         separator1.setSeparator(True)
         separator2 = QAction(self)
         separator2.setSeparator(True)
-        self.mainFileView.setContextMenuPolicy(Qt.ActionsContextMenu)
-        for action in self.fileActions:
-            if action == self.exitAction:
+
+        self._mainFileView.setContextMenuPolicy(Qt.ActionsContextMenu)
+        for action in self._fileActions:
+            if action == self._exitAction:  # don't include Exit button in the context menu
                 continue
-            self.mainFileView.addAction(action)
-        self.mainFileView.addAction(separator1)
-        for action in self.editActions:
-            self.mainFileView.addAction(action)
-        self.mainFileView.addAction(separator2)
-        for action in self.viewActions:
-            self.mainFileView.addAction(action)
+            self._mainFileView.addAction(action)
+        self._mainFileView.addAction(separator1)
+        for action in self._editActions:
+            self._mainFileView.addAction(action)
+        self._mainFileView.addAction(separator2)
+        for action in self._viewActions:
+            self._mainFileView.addAction(action)
 
-    def connectSignals(self):
-        self.documentsButton.pressed.connect(lambda: self.openPath(path=Path.home().joinpath('Documents')))
-        self.desktopButton.pressed.connect(lambda: self.openPath(path=Path.home().joinpath('Desktop')))
+    def _connectSignals(self) -> None:
+        """
+        Connects buttons and actions with functions
+        """
+        self._documentsButton.pressed.connect(lambda: self._openPath(path=Path.home().joinpath('Documents')))
+        self._desktopButton.pressed.connect(lambda: self._openPath(path=Path.home().joinpath('Desktop')))
 
-        self.openAction.triggered.connect(lambda: self.openPath(self.mainFileView.selectedIndexes()))
-        self.newFolderAction.triggered.connect(lambda: self.addRowToModel(True))
-        self.newFileAction.triggered.connect(lambda: self.addRowToModel(False))
-        self.exitAction.triggered.connect(self.close)
+        # File tab actions
+        self._openAction.triggered.connect(lambda: self._openPath(self._mainFileView.selectedIndexes()))
+        self._newFolderAction.triggered.connect(lambda: self._addRowToModel(True))
+        self._newFileAction.triggered.connect(lambda: self._addRowToModel(False))
+        self._exitAction.triggered.connect(self.close)
 
-        self.copyPathAction.triggered.connect(lambda: self.copyPath(self.mainFileView.selectedIndexes()))
-        self.copyFileAction.triggered.connect(lambda: self.copyFile(self.mainFileView.selectedIndexes()))
-        self.pasteFileAction.triggered.connect(self.pasteFile)
-        self.renameAction.triggered.connect(lambda: self.renameTrigger(self.mainFileView.selectedIndexes()))
-        self.bulkRenameAction.triggered.connect(lambda: self.bulkRename(self.mainFileView.selectedIndexes()))
-        self.deleteAction.triggered.connect(lambda: self.deleteItem(self.mainFileView.selectedIndexes()))
-        self.cutAction.triggered.connect(lambda: self.copyFile(self.mainFileView.selectedIndexes(), cut=True))
+        # Edit tab actions
+        self._copyFileAction.triggered.connect(lambda: self._copyFile(self._mainFileView.selectedIndexes()))
+        self._copyPathAction.triggered.connect(lambda: self._copyPath(self._mainFileView.selectedIndexes()))
+        self._cutAction.triggered.connect(lambda: self._copyFile(self._mainFileView.selectedIndexes(), cut=True))
+        self._pasteFileAction.triggered.connect(self._pasteFile)
+        self._renameAction.triggered.connect(lambda: self._renameTrigger(self._mainFileView.selectedIndexes()))
+        self._bulkRenameAction.triggered.connect(lambda: self._bulkRename(self._mainFileView.selectedIndexes()))
+        self._deleteAction.triggered.connect(lambda: self._deleteItem(self._mainFileView.selectedIndexes()))
 
-        self.refreshAction.triggered.connect(self.listDirectories)
-        self.goBackAction.triggered.connect(self.goBack)
-        self.goForwardAction.triggered.connect(self.goForward)
-        self.goUpAction.triggered.connect(self.goUp)
+        # View tab actions
+        self._refreshAction.triggered.connect(self._listDirectories)
+        self._sortAction.triggered.connect(self._sortHandler)
 
-        self.sortAction.triggered.connect(self.sortHandler)
+        # Navigation buttons' actions
+        self._goBackAction.triggered.connect(self._goBack)
+        self._goForwardAction.triggered.connect(self._goForward)
+        self._goUpAction.triggered.connect(self._goUp)
 
-        self.mainFileView.doubleClicked.connect(lambda: self.openPath(self.mainFileView.selectedIndexes()))
-        self.sideFileView.clicked.connect(lambda: self.openPath(self.sideFileView.selectedIndexes(), False))
-        self.sideFileView.expanded.connect(lambda: self.sideFileView.resizeColumnToContents(0))
+        # path opening from main file view, side file view and address bar
+        self._mainFileView.doubleClicked.connect(lambda: self._openPath(self._mainFileView.selectedIndexes()))
+        self._sideFileView.clicked.connect(lambda: self._openPath(self._sideFileView.selectedIndexes(), False))
+        self._addressBar.returnPressed.connect(lambda: self._openPath(path=Path(self._addressBar.text())))
 
-        self.mainFileView.itemDelegate().closeEditor.connect(self.editHandler)
-        self.mainFileView.itemDropped.connect(self.dropMove)
+        # auto-adjustment of side file view width
+        self._sideFileView.expanded.connect(lambda: self._sideFileView.resizeColumnToContents(0))
 
-        self.addressBar.returnPressed.connect(lambda: self.openPath(path=self.addressBar.text()))
-        self.filterField.textChanged.connect(self.listDirectories)
-        self.filterField.returnPressed.connect(lambda: self.listDirectories(self.filterField.text()))
+        # handling item edit
+        self._mainFileView.itemDelegate().closeEditor.connect(self._editHandler)
 
-    def bulkRenameDialog(self):
+        # drag and drop functionality
+        self._mainFileView.itemDropped.connect(self._dropMove)
+
+        # View tab filter
+        self._filterField.textChanged.connect(self._listDirectories)
+        self._filterField.returnPressed.connect(lambda: self._listDirectories(self._filterField.text()))
+
+    def _listDirectories(self, filter: str = None) -> None:
+        """
+        Shows all files in the current directory
+
+        :param filter: show only files containing that text
+        """
+        self._addressBar.setText(str(self._currPath))
+        self._resetMainFileView()
+        fileIco = QIcon(':file_sm')
+        folderIco = QIcon(':folder_sm')
+        fileCutIco = QIcon(':file_sm_cut')
+        folderCutIco = QIcon(':folder_sm_cut')
+        for file in self._currPath.glob('*'):
+            if self._isPathHidden(file):
+                continue
+            if filter and filter.lower() not in file.name.lower():
+                continue
+            if file.is_dir():
+                size = QStandardItem('')
+                type = QStandardItem('Folder')
+                icon = folderIco if Path(file) not in self._fileClipboard else folderCutIco
+            else:
+                size = QStandardItem(self._prettifySize(file.stat().st_size))
+                type = QStandardItem(f'{file.suffix.upper()}{" " if file.suffix else ""}File')
+                icon = fileIco if Path(file) not in self._fileClipboard else fileCutIco
+            item = QStandardItem(icon, file.name)
+            mod_date_str = dt.datetime.fromtimestamp(file.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+            mod_date = QStandardItem(mod_date_str)
+            self._model.appendRow([item, type, mod_date, size])
+        self._mainFileView.sortByColumn(1, Qt.DescendingOrder)
+
+    def _resetMainFileView(self) -> None:
+        """
+        Clears the main file view
+        """
+        self._model.clear()
+        self._model.setHorizontalHeaderLabels(self._modelHeaders)
+        self._mainFileView.setColumnWidth(0, 250)
+        self._mainFileView.setColumnWidth(2, 150)
+        self._mainFileView.resizeColumnToContents(4)
+
+    def _prettifySize(self, size) -> str:
+        """
+        Converts filesize in bytes to the smallest possible number
+
+        :param size: filesize in bytes
+        :return: filesize with proper suffix
+        """
+        iteration = 0
+        while size >= 1024:
+            size /= 1024
+            iteration += 1
+        size = f'{size:.2f}'.rstrip('0').rstrip('.').rjust(6)  # 6 is maximal number of digits of any input
+        return f'{size} {self._SIZES_SUFFIX[iteration]}'
+
+    def _isPathHidden(self, path: Path) -> bool:
+        """
+        Determines if the given path is hidden or not
+
+        :param path: path to check
+        :return: True if the given path is hidden, False otherwise
+        """
+        if os.name == 'nt':  # on Windows, check Windows flags of the path
+            try:
+                fileAttrs = win32api.GetFileAttributes(str(path))
+                return fileAttrs & (win32con.FILE_ATTRIBUTE_HIDDEN | win32con.FILE_ATTRIBUTE_SYSTEM)
+            except pywintypes.error:
+                return False
+        else:
+            return path.name.startswith('.')
+
+    def _openPath(self, item: List[QModelIndex] = None, mainView: bool = True, path: Path = None,
+                  ignoreStack: bool = False) -> None:
+        """
+        Opens the given path in main file view
+
+        :param item: list of selected items
+        :param mainView: if the item was selected in the main file view
+        :param path: path to be opened
+        :param ignoreStack: if the opening action should not be listed in last visited directories stack
+        """
+        if not item and not path:
+            return
+        if mainView and item:
+            dir_name = self._model.data(item[0])  # if multiple items are selected, open the first one
+            path = self._currPath.parent if dir_name == '..' else self._currPath.joinpath(dir_name)
+        elif not mainView and item:
+            path = Path(self._sideModel.filePath(item[0]))
+
+        if path.is_dir():
+            try:
+                os.listdir(str(path))  # used, because Path.glob() doesn't throw PermissionError
+                if not ignoreStack and not path == self._currPath:
+                    for _ in range(-1, self._stackIndex, -1):
+                        self._pathStack.pop()
+                    self._pathStack.append(path)
+                    self._stackIndex = -1
+                self._currPath = path
+                self._listDirectories()
+            except PermissionError:
+                self._statusBar.showMessage('Access denied!', 3000)
+        elif path.is_file():
+            subprocess.Popen(str(path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True).poll()
+        else:
+            self._statusBar.showMessage('Invalid path!', 3000)
+            self._listDirectories()
+
+    def _addRowToModel(self, isDir: bool) -> None:
+        """
+        Add item to main file view before creating the new file/folder
+
+        :param isDir: if it's a folder to be created
+        """
+        if isDir:
+            self._model.appendRow(QStandardItem(QIcon(':folder_sm'), 'New Folder'))
+            self._editItemType = 'folder'
+        else:
+            self._model.appendRow(QStandardItem(QIcon(':file_sm'), 'New File'))
+            self._editItemType = 'file'
+        self._mainFileView.scrollToBottom()
+        self._editItem = self._model.item(self._model.rowCount() - 1)
+        self._editItemNameBefore = self._editItem.text()
+        index = self._model.indexFromItem(self._editItem)
+        self._mainFileView.setCurrentIndex(index)
+        self._mainFileView.edit(index)
+
+    def _editHandler(self) -> None:
+        """
+        Handler for closeEditor signal
+        """
+        if self._editItemType:
+            self._createDir()
+        else:
+            self._renameDir()
+
+    def _createDir(self) -> None:
+        """
+        Creates a folder/file based on current directory and name given to the item editor
+        """
+        try:
+            name = self._editItem.text()
+            path = self._currPath.joinpath(name)
+            if self._editItemType == 'folder':
+                path.mkdir()
+            elif self._editItemType == 'file':
+                if len(self._model.findItems(name)) > 1:
+                    # this method of creating file does not prevent duplicates, so exception is raised manually
+                    raise FileExistsError
+                with path.open('w+', encoding='utf-8'):
+                    pass
+            self._listDirectories()
+            createdItem = self._model.findItems(name)
+            index = self._model.indexFromItem(createdItem[0])
+            self._mainFileView.scrollTo(index)
+            self._mainFileView.setCurrentIndex(index)
+        except FileExistsError:
+            self._statusBar.showMessage('File/folder with that name already exists!', 3000)
+            self._listDirectories()
+        except PermissionError:
+            self._statusBar.showMessage('File/folder with that name could not be created!', 3000)
+            self._listDirectories()
+
+    def _copyFile(self, items: List[QModelIndex], cut: bool = False) -> None:
+        """
+        Copies the paths to given files and stores them in the internal clipboard
+
+        :param items: list of selected items
+        :param cut: if the files have to be moved instead of copied
+        """
+        if len(items) == 0:
+            return
+        items = [x for i, x in enumerate(items) if i % len(self._modelHeaders) == 0]
+        self._fileClipboard = [self._currPath.joinpath(self._model.itemFromIndex(x).text()) for x in items]
+        self._fileClipboard.append(cut)
+        self._listDirectories()
+        self._pasteFileAction.setEnabled(True)
+        self._statusBar.showMessage('File copied to clipboard!', 3000)
+
+    def _copyPath(self, items: List[QModelIndex]) -> None:
+        """
+        Copies the paths to given dirs and stores them in the external clipboard
+
+        :param items: list of selected items
+        """
+        if len(items) == 0:
+            return
+        items = [x for i, x in enumerate(items) if i % len(self._modelHeaders) == 0]
+        items = [str(self._currPath.joinpath(self._model.itemFromIndex(x).text())) for x in items]
+        pyperclip.copy(', '.join(items))
+        self._statusBar.showMessage('Path copied to clipboard!', 3000)
+
+    def _pasteFile(self) -> None:
+        """
+        Pastes the dirs (based on paths in internal clipboard) to the current directory
+        """
+        if not self._fileClipboard:
+            return
+        cut = self._fileClipboard.pop()
+        filenames = [x.name for x in self._fileClipboard]
+        destPaths = [self._currPath.joinpath(x) for x in filenames]
+        try:
+            duplicates = []
+            for src, dest in zip(self._fileClipboard, destPaths):
+                if src == dest:
+                    raise shutil.SameFileError
+                if dest in self._currPath.glob('*'):
+                    duplicates.append(dest)
+            if duplicates:
+                if self._overwriteFileMsgBox(duplicates) == QMessageBox.Cancel:
+                    self._fileClipboard.clear()
+                    self._pasteFileAction.setEnabled(False)
+                    return
+            for src, dest in zip(self._fileClipboard, destPaths):
+                if cut and src.is_file():
+                    shutil.move(str(src), str(dest))
+                elif src.is_dir():
+                    dir_util.copy_tree(str(src), str(dest))
+                    if cut:
+                        shutil.rmtree(src)
+                elif src.is_file():
+                    shutil.copy(str(src), str(dest))
+                elif not src.exists():
+                    raise FileNotFoundError
+            self._statusBar.showMessage('File pasted!', 3000)
+            self._fileClipboard.clear()
+            self._pasteFileAction.setEnabled(False)
+        except shutil.SameFileError:
+            self._statusBar.showMessage('You cannot overwrite the same file!', 3000)
+            self._fileClipboard.clear()
+        except PermissionError:
+            self._statusBar.showMessage('No permission to copy the file!', 3000)
+            self._fileClipboard.clear()
+        except FileNotFoundError:
+            self._statusBar.showMessage('Cannot find the source file!', 3000)
+            self._fileClipboard.clear()
+        finally:
+            self._listDirectories()
+
+    def _overwriteFileMsgBox(self, duplicates: List[Path]) -> int:
+        """
+        MessageBox to confirm file overwriting
+
+        :param duplicates: list of duplicate files/folders
+        :return: 1 if Ok button clicked, 0 otherwise
+        """
+        msgBox = QMessageBox()
+        msgBox.setIcon(QMessageBox.Warning)
+        if len(duplicates) > 1:
+            msgText = f"Do you want to overwrite {len(duplicates)} files?"
+        else:
+            msgText = f"Do you want to overwrite '{duplicates[0].name}'?"
+        msgBox.setText(msgText)
+        msgBox.setWindowTitle("Confirm overwrite")
+        msgBox.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+
+        return msgBox.exec()
+
+    def _renameTrigger(self, item: List[QModelIndex]) -> None:
+        """
+        Renames the given folder/file
+
+        :param item: the item from main file view representing the folder/file to be renamed
+        """
+        if not item:
+            return
+        item = item[0].siblingAtColumn(0)
+        self._editItemNameBefore = item.data()
+        self._editItem = self._model.itemFromIndex(item)
+        self._editItemType = None
+        self._mainFileView.edit(item)
+
+    def _renameDir(self) -> None:
+        """
+        Renames selected folder/file to the name given in the item editor
+        """
+        try:
+            path = self._currPath.joinpath(self._editItemNameBefore)
+            nameAfter = self._editItem.text()
+            pathTo = self._currPath.joinpath(nameAfter)
+            path.rename(pathTo)
+            self._listDirectories()
+            renamedItem = self._model.findItems(nameAfter)
+            index = self._model.indexFromItem(renamedItem[0])
+            self._mainFileView.scrollTo(index)
+            self._mainFileView.setCurrentIndex(index)
+        except FileExistsError:
+            self._statusBar.showMessage('File/folder with that name already exists!', 3000)
+            self._listDirectories()
+
+    def _bulkRename(self, items: List[QModelIndex]) -> None:
+        """
+        Renames multiple files based on user-inputted parameters
+
+        :param items: list of selected items
+        """
+        items = [self._currPath.joinpath(x.siblingAtColumn(0).data())
+                 for i, x in enumerate(items) if i % len(self._modelHeaders) == 0]
+        items = list(filter(lambda x: x.is_file(), items))
+        illegalChars = {'<', '>', ':', '"', '/', '\\', '|', '?', '*'}
+        while True:
+            response, onlySelected, extension, prefix, startNumber = self._bulkRenameDialog()
+            if not response:
+                break
+            if not items and onlySelected:
+                self._bulkRenameMsgBox('No files were selected!')
+                continue
+            elif any((c in illegalChars) for c in prefix):
+                self._bulkRenameMsgBox('Illegal characters in prefix!')
+                continue
+            fileFound = False
+            for path in self._currPath.glob('*'):
+                try:
+                    if extension is not None and extension != path.suffix.lstrip('.'):
+                        continue
+                    if path.is_file() and (not onlySelected or path in items):
+                        path.rename(self._currPath.joinpath(f'{prefix}{str(startNumber)}{path.suffix}'))
+                        startNumber += 1
+                        fileFound = True
+                except FileExistsError:
+                    self._bulkRenameMsgBox(f'File {path.name} already exists!')
+                    self._statusBar.showMessage('Operation aborted!', 3000)
+                    return
+                finally:
+                    self._listDirectories()
+            if not fileFound:
+                self._bulkRenameMsgBox('No suitable files in given directory!')
+                continue
+            break
+
+    def _bulkRenameDialog(self) -> Tuple[Any, Any, Optional[Any], Any, Union[int, Any]]:
+        """
+        Dialog for setting parameters for bulk rename
+
+        :return: tuple of parameters
+        """
         dialog = QDialog()
         dialog.setWindowTitle('Bulk Rename')
         dialog.setWindowIcon(QIcon(':bulk_rename.png'))
 
+        # layouts
         dialogLayout = QVBoxLayout()
+        extensionLayout = QHBoxLayout()
+        prefixLayout = QHBoxLayout()
+        startNumLayout = QHBoxLayout()
+        namePreviewLayout = QHBoxLayout()
+        buttonBoxLayout = QHBoxLayout()
+
+        # path bar
         dialogLayout.addWidget(QLabel('Rename files in:'))
-        pathLine = QLineEdit(str(self.currPath))
+        pathLine = QLineEdit(str(self._currPath))
         pathLine.setReadOnly(True)
         dialogLayout.addWidget(pathLine)
 
+        # checkbox for renaming only selected
         onlySelectedCheck = QCheckBox('Rename only selected files')
         dialogLayout.addWidget(onlySelectedCheck)
 
-        extensionLayout = QHBoxLayout()
+        # checkbox and text input for extension of files to be renamed
         extensionCheck = QCheckBox('Rename only files with extension:')
         extensionLine = QLineEdit()
         extensionLine.setEnabled(False)
@@ -343,10 +736,10 @@ class FileManager(QMainWindow):
         extensionLayout.addWidget(extensionCheck)
         extensionLayout.addWidget(extensionLine)
         dialogLayout.addLayout(extensionLayout)
-
+        # disable text input if checkbox is not ticked
         extensionCheck.stateChanged.connect(lambda: extensionLine.setEnabled(not extensionLine.isEnabled()))
 
-        prefixLayout = QHBoxLayout()
+        # text input for filename pattern
         prefixLabel = QLabel('Prefix:')
         prefixLine = QLineEdit()
         prefixLabel.setFixedWidth(40)
@@ -356,7 +749,7 @@ class FileManager(QMainWindow):
         prefixLayout.setAlignment(Qt.AlignLeft)
         dialogLayout.addLayout(prefixLayout)
 
-        startNumLayout = QHBoxLayout()
+        # checkbox and spinbox for filenames' starting index
         startNumCheck = QCheckBox('Start from number:')
         startNumSpin = QSpinBox()
         startNumSpin.setEnabled(False)
@@ -368,10 +761,10 @@ class FileManager(QMainWindow):
         startNumLayout.addWidget(startNumCheck)
         startNumLayout.addWidget(startNumSpin)
         dialogLayout.addLayout(startNumLayout)
-
+        # disable spinbox if checkbox is not ticked
         startNumCheck.stateChanged.connect(lambda: startNumSpin.setEnabled(not startNumSpin.isEnabled()))
 
-        namePreviewLayout = QHBoxLayout()
+        # read-only text field with the preview of name of the first file
         namePreviewLabel = QLabel('Filename preview:')
         namePreviewLine = QLineEdit()
         namePreviewLine.setReadOnly(True)
@@ -380,12 +773,11 @@ class FileManager(QMainWindow):
         namePreviewLayout.addWidget(namePreviewLine)
         namePreviewLayout.addWidget(namePreviewPush)
         dialogLayout.addLayout(namePreviewLayout)
-
         namePreviewPush.clicked.connect(
             lambda: namePreviewLine.setText(f"{prefixLine.text()}"
                                             f"{str(startNumSpin.value()) if startNumCheck.isChecked() else '0'}"))
 
-        buttonBoxLayout = QHBoxLayout()
+        # Ok and Cancel buttons
         buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttonBox.accepted.connect(dialog.accept)
         buttonBox.rejected.connect(dialog.reject)
@@ -402,7 +794,13 @@ class FileManager(QMainWindow):
 
         return dialogResponse, onlySelectedCheck.isChecked(), extension, prefixLine.text(), startNum
 
-    def bulkRenameMsgBox(self, msgText):
+    def _bulkRenameMsgBox(self, msgText: str) -> int:
+        """
+        MessageBox for errors in bulk rename
+
+        :param msgText: text to be displayed in the MessageBox
+        :return: 1 if Ok button clicked, 0 otherwise
+        """
         msgBox = QMessageBox()
         msgBox.setIcon(QMessageBox.Warning)
         msgBox.setWindowIcon(QIcon(':bulk_rename.png'))
@@ -412,82 +810,78 @@ class FileManager(QMainWindow):
 
         return msgBox.exec()
 
-    def bulkRename(self, items: List[QModelIndex]):
-        items = [self.currPath.joinpath(x.siblingAtColumn(0).data())
-                 for i, x in enumerate(items) if i % len(self.modelHeaders) == 0]
-        items = list(filter(lambda x: x.is_file(), items))
-        illegalChars = {'<', '>', ':', '"', '/', '\\', '|', '?', '*'}
-        while True:
-            response, onlySelected, extension, prefix, startNumber = self.bulkRenameDialog()
-            if not response:
-                break
-            if not items and onlySelected:
-                self.bulkRenameMsgBox('No files were selected!')
-                continue
-            elif any((c in illegalChars) for c in prefix):
-                self.bulkRenameMsgBox('Illegal characters in prefix!')
-                continue
-            fileFound = False
-            for path in self.currPath.glob('*'):
+    def _deleteItem(self, items: List[QModelIndex]) -> None:
+        """
+        Deletes selected files/folders
+
+        :param items: list of selected items
+        """
+        if not items:
+            return
+        files = [x for i, x in enumerate(items) if i % len(self._modelHeaders) == 0]
+
+        if self._deleteItemMsgBox(files) == QMessageBox.Ok:
+            for file in files:
+                path = self._currPath.joinpath(file.data())
                 try:
-                    if extension is not None and extension != path.suffix.lstrip('.'):
-                        continue
-                    if path.is_file() and (not onlySelected or path in items):
-                        path.rename(self.currPath.joinpath(f'{prefix}{str(startNumber)}{path.suffix}'))
-                        startNumber += 1
-                        fileFound = True
-                except FileExistsError:
-                    self.bulkRenameMsgBox(f'File {path.name} already exists!')
-                    self.statusBar.showMessage('Operation aborted!', 3000)
-                    return
-                finally:
-                    self.listDirectories()
-            if not fileFound:
-                self.bulkRenameMsgBox('No suitable files in given directory!')
-                continue
-            break
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    elif path.is_file():
+                        os.remove(path)
+                except FileNotFoundError:
+                    self._statusBar.showMessage('Something went wrong!', 3000)
+            self._listDirectories()
 
-        # def bulkRename(self, items: List[QModelIndex]):
-        #     items = [self.currPath.joinpath(x.siblingAtColumn(0).data())
-        #              for i, x in enumerate(items) if i % len(self.modelHeaders) == 0]
-        #     items = list(filter(lambda x: x.is_file(), items))
-        #     illegalChars = {'<', '>', ':', '"', '/', '\\', '|', '?', '*'}
-        #     response, onlySelected, extension, prefix, startNumber = self.bulkRenameDialog()
-        #     if not response:
-        #         return
-        #     elif not items and onlySelected:
-        #         self.bulkRenameMsgBox('No files were selected!')
-        #     elif any((c in illegalChars) for c in prefix):
-        #         self.bulkRenameMsgBox('Illegal characters in prefix!')
-        #     fileFound = False
-        #     for path in self.currPath.glob('*'):
-        #         if extension is not None and extension != path.suffix.lstrip('.'):
-        #             continue
-        #         if path.is_file() and (not onlySelected or path in items):
-        #             path.rename(self.currPath.joinpath(f'{prefix}{str(startNumber)}{path.suffix}'))
-        #             startNumber += 1
-        #             fileFound = True
-        #
-        #     self.listDirectories()
-        #
-        # if not fileFound:
-        #     self.bulkRenameMsgBox('No suitable files in given directory!')
+    def _deleteItemMsgBox(self, files: List[QModelIndex]) -> int:
+        """
+        MessageBox for confirmation of deleting items
 
-    def sortDialog(self):
+        :param files: list of files to be deleted
+        :return: 1 if Ok button clicked, 0 otherwise
+        """
+        msgBox = QMessageBox()
+        msgBox.setWindowTitle("Confirm delete")
+        msgBox.setIcon(QMessageBox.Warning)
+        filename = files[0].data() if len(files) == 1 else None
+        msgText = f"Are you sure to delete '{filename}'?" if filename else f"Are you sure to delete {len(files)} items?"
+        msgBox.setText(msgText)
+        msgBox.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+
+        return msgBox.exec()
+
+    def _sortHandler(self) -> None:
+        """
+        Handler for the sort action
+        """
+        response, columnIndex, ascending = self._sortDialog()
+        order = Qt.AscendingOrder if ascending else Qt.DescendingOrder
+        if response:
+            self._mainFileView.sortByColumn(columnIndex, order)
+
+    def _sortDialog(self) -> Tuple[Any, Any, Any]:
+        """
+        Dialog for setting parameters for sorting
+
+        :return: tuple of sort parameters
+        """
         dialog = QDialog()
         dialog.setFixedSize(300, 150)
         dialog.setWindowTitle('Sort')
         dialog.setWindowIcon(QIcon(':sort.png'))
 
+        # layouts
         dialogLayout = QVBoxLayout()
-
         formLayout = QFormLayout()
+        orderRadioLayout = QVBoxLayout()
+        buttonBoxLayout = QHBoxLayout()
 
+        # sort by column combobox
         sortLabel = QLabel('Sort by:')
         sortComboBox = QComboBox()
-        sortComboBox.addItems(self.modelHeaders)
+        sortComboBox.addItems(self._modelHeaders)
+
+        # order choosing radio buttons
         orderLabel = QLabel('Order:')
-        orderRadioLayout = QVBoxLayout()
         orderRadioAsc = QRadioButton('ascending')
         orderRadioAsc.setChecked(True)
         orderRadioDesc = QRadioButton('descending')
@@ -497,7 +891,7 @@ class FileManager(QMainWindow):
         formLayout.addRow(sortLabel, sortComboBox)
         formLayout.addRow(orderLabel, orderRadioLayout)
 
-        buttonBoxLayout = QHBoxLayout()
+        # Ok and Cancel buttons
         buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttonBox.accepted.connect(dialog.accept)
         buttonBox.rejected.connect(dialog.reject)
@@ -515,32 +909,32 @@ class FileManager(QMainWindow):
 
         return dialogResponse, sortComboBox.currentIndex(), orderRadioAsc.isChecked()
 
-    def sortHandler(self):
-        response, columnIndex, ascending = self.sortDialog()
-        order = Qt.AscendingOrder if ascending else Qt.DescendingOrder
-        if response:
-            self.mainFileView.sortByColumn(columnIndex, order)
+    def _dropMove(self, point: QPoint, selectedFiles: List[QModelIndex]) -> None:
+        """
+        Handles drag and drop file moving
 
-    def dropMove(self, point, selectedFiles):
-        selectedFiles = [self.currPath.joinpath(x.data()) for i, x in enumerate(selectedFiles)
-                         if i % len(self.modelHeaders) == 0]
+        :param point: point where the dragged items are dropped
+        :param selectedFiles: list of selected items
+        """
+        selectedFiles = [self._currPath.joinpath(x.data()) for i, x in enumerate(selectedFiles)
+                         if i % len(self._modelHeaders) == 0]
         try:
-            fname = self.mainFileView.indexAt(point).siblingAtColumn(0).data()
-            dest = self.currPath.joinpath(fname)
+            filename = self._mainFileView.indexAt(point).siblingAtColumn(0).data()
+            dest = self._currPath.joinpath(filename)
             if dest.is_file():
                 return
             duplicates = []
             for src in selectedFiles:
-                dest = self.currPath.joinpath(fname).joinpath(src.name)
+                dest = self._currPath.joinpath(filename).joinpath(src.name)
                 if str(src) in str(dest):
                     return
                 if dest.exists():
                     duplicates.append(dest)
             if duplicates:
-                if self.overwriteFileDialog(duplicates) == QMessageBox.Cancel:
+                if self._overwriteFileMsgBox(duplicates) == QMessageBox.Cancel:
                     return
             for src in selectedFiles:
-                dest = self.currPath.joinpath(fname).joinpath(src.name)
+                dest = self._currPath.joinpath(filename).joinpath(src.name)
                 if not src.exists():
                     raise FileNotFoundError
                 if src.is_file():
@@ -549,263 +943,33 @@ class FileManager(QMainWindow):
                     dir_util.copy_tree(str(src), str(dest))
                     shutil.rmtree(src)
         except FileNotFoundError:
-            self.statusBar.showMessage('File not found!', 3000)
-        except TypeError:
+            self._statusBar.showMessage('File not found!', 3000)
+        except TypeError:  # when the files are dropped on empty area
             pass
         finally:
-            self.listDirectories()
+            self._listDirectories()
 
-    def listDirectories(self, filter=None):
-        self.addressBar.setText(str(self.currPath))
-        self.model.clear()
-        self.updateMainFileView()
-        fileIco = QIcon(':file_sm')
-        folderIco = QIcon(':folder_sm')
-        fileCutIco = QIcon(':file_sm_cut')
-        folderCutIco = QIcon(':folder_sm_cut')
-        for file in self.currPath.glob('*'):
-            if self.isFolderHidden(file):
-                continue
-            if filter and filter.lower() not in file.name.lower():
-                continue
-            if file.is_dir():
-                size = QStandardItem('')
-                type = QStandardItem('Folder')
-                icon = folderIco if Path(file) not in self.fileClipboard else folderCutIco
-            else:
-                size = QStandardItem(self.prettifySize(file.stat().st_size))
-                type = QStandardItem(f'{file.suffix.upper()}{" " if file.suffix else ""}File')
-                icon = fileIco if Path(file) not in self.fileClipboard else fileCutIco
-            item = QStandardItem(icon, file.name)
-            mod_date_str = dt.datetime.fromtimestamp(file.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
-            mod_date = QStandardItem(mod_date_str)
-            self.model.appendRow([item, type, mod_date, size])
-        self.mainFileView.sortByColumn(1, Qt.DescendingOrder)
+    def _goBack(self) -> None:
+        """
+        Returns to the last visited directory (goes back in directories stack)
+        """
+        if abs(self._stackIndex) < len(self._pathStack):
+            self._stackIndex -= 1
+            self._openPath(path=self._pathStack[self._stackIndex], ignoreStack=True)
 
-    def isFolderHidden(self, path: Path):
-        if os.name == 'nt':
-            try:
-                fileAttrs = win32api.GetFileAttributes(str(path))
-                return fileAttrs & (win32con.FILE_ATTRIBUTE_HIDDEN | win32con.FILE_ATTRIBUTE_SYSTEM)
-            except pywintypes.error:
-                return False
-        else:
-            return path.name.startswith('.')
+    def _goForward(self) -> None:
+        """
+        Goes forward in directories stack
+        """
+        if self._stackIndex < -1:
+            self._stackIndex += 1
+            self._openPath(path=self._pathStack[self._stackIndex], ignoreStack=True)
 
-    def openPath(self, item=None, main=True, path=None, ignoreStack=False):
-        if not item and not path:
-            return
-        if main and item:
-            dir_name = self.model.data(item[0])
-            path = self.currPath.parent if dir_name == '..' else self.currPath.joinpath(dir_name)
-        elif not main and item:
-            path = Path(self.sideModel.filePath(item[0]))
-        elif type(path) is str:
-            path = Path(path)
-
-        if path.is_dir():
-            try:
-                os.listdir(str(path))  # used, because Path.glob() doesn't throw PermissionError
-                if not ignoreStack and not path == self.currPath:
-                    for _ in range(-1, self.stackIndex, -1):
-                        self.pathStack.pop()
-                    self.pathStack.append(path)
-                    self.stackIndex = -1
-                self.currPath = path
-                self.listDirectories()
-            except PermissionError:
-                self.statusBar.showMessage('Access denied!', 3000)
-        elif path.is_file():
-            subprocess.Popen(str(path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True).poll()
-        else:
-            self.statusBar.showMessage('Invalid path!', 3000)
-            self.listDirectories()
-
-    def goBack(self):
-        if abs(self.stackIndex) < len(self.pathStack):
-            self.stackIndex -= 1
-            self.openPath(path=self.pathStack[self.stackIndex], ignoreStack=True)
-
-    def goForward(self):
-        if self.stackIndex < -1:
-            self.stackIndex += 1
-            self.openPath(path=self.pathStack[self.stackIndex], ignoreStack=True)
-
-    def goUp(self):
-        self.openPath(path=self.currPath.parent)
-
-    def addRowToModel(self, isDir):
-        if isDir:
-            self.model.appendRow(QStandardItem(QIcon(':folder_sm'), 'New Folder'))
-            self.editItemType = 'folder'
-        else:
-            self.model.appendRow(QStandardItem(QIcon(':file_sm'), 'New File'))
-            self.editItemType = 'file'
-        self.mainFileView.scrollToBottom()
-        self.editItem = self.model.item(self.model.rowCount() - 1)
-        self.editItemNameBefore = self.editItem.text()
-        index = self.model.indexFromItem(self.editItem)
-        self.mainFileView.setCurrentIndex(index)
-        self.mainFileView.edit(index)
-
-    def editHandler(self):
-        # nie mogę rozdzielić na dwie funkcje, bo editFinished signal
-        # ewentualnie zrobić dwie następne funkcje i tu wrzucić
-        if self.editItemType:
-            try:
-                name = self.editItem.text()
-                path = self.currPath.joinpath(name)
-                if self.editItemType == 'folder':
-                    path.mkdir()
-                elif self.editItemType == 'file':
-                    if len(self.model.findItems(name)) > 1:
-                        raise FileExistsError
-                    with path.open('w+', encoding='utf-8'):
-                        pass
-                self.listDirectories()
-                createdItem = self.model.findItems(name)
-                index = self.model.indexFromItem(createdItem[0])
-                self.mainFileView.scrollTo(index)
-                self.mainFileView.setCurrentIndex(index)
-            except FileExistsError:
-                self.statusBar.showMessage('File/folder with that name already exists!', 3000)
-                self.listDirectories()
-        else:
-            try:
-                path = self.currPath.joinpath(self.editItemNameBefore)
-                nameAfter = self.editItem.text()
-                pathTo = self.currPath.joinpath(nameAfter)
-                path.rename(pathTo)
-                self.listDirectories()
-                renamedItem = self.model.findItems(nameAfter)
-                index = self.model.indexFromItem(renamedItem[0])
-                self.mainFileView.scrollTo(index)
-                self.mainFileView.setCurrentIndex(index)
-            except FileExistsError:
-                self.statusBar.showMessage('File/folder with that name already exists!', 3000)
-                self.listDirectories()
-
-    def renameTrigger(self, item):
-        if not item:
-            return
-        item = item[0].siblingAtColumn(0)
-        self.editItemNameBefore = item.data()
-        self.editItem = self.model.itemFromIndex(item)
-        self.editItemType = None
-        self.mainFileView.edit(item)
-
-    def deleteItem(self, items: List[QModelIndex]):
-        if not items:
-            return
-        files = [x for i, x in enumerate(items) if i % len(self.modelHeaders) == 0]
-        filename = files[0].data() if len(files) == 1 else None
-        msgBox = QMessageBox()
-        msgBox.setIcon(QMessageBox.Warning)
-        msgText = f"Are you sure to delete '{filename}'?" if filename else f"Are you sure to delete {len(files)} items?"
-        msgBox.setText(msgText)
-        msgBox.setWindowTitle("Confirm delete")
-        msgBox.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
-
-        returnValue = msgBox.exec()
-        if returnValue == QMessageBox.Ok:
-            for file in files:
-                path = self.currPath.joinpath(file.data())
-                try:
-                    if path.is_dir():
-                        shutil.rmtree(path)
-                    elif path.is_file():
-                        os.remove(path)
-                except FileNotFoundError:
-                    self.statusBar.showMessage('Something went wrong!', 3000)
-            self.listDirectories()
-
-    def prettifySize(self, size):
-        iteration = 0
-        while size >= 1024:
-            size /= 1024
-            iteration += 1
-        size = f'{size:.2f}'.rstrip('0').rstrip('.').rjust(6)
-        return f'{size} {self.SIZES_SUFF[iteration]}'
-
-    def copyPath(self, items):
-        if len(items) == 0:
-            return
-        items = [x for i, x in enumerate(items) if i % len(self.modelHeaders) == 0]
-        items = [str(self.currPath.joinpath(self.model.itemFromIndex(x).text())) for x in items]
-        pyperclip.copy(', '.join(items))
-        self.statusBar.showMessage('Path copied to clipboard!', 3000)
-
-    def copyFile(self, items, cut=False):
-        if len(items) == 0:
-            return
-        items = [x for i, x in enumerate(items) if i % len(self.modelHeaders) == 0]
-        self.fileClipboard = [self.currPath.joinpath(self.model.itemFromIndex(x).text()) for x in items]
-        self.fileClipboard.append(cut)
-        if cut:
-            folderCutIcon, fileCutIcon = QIcon(':folder_sm_cut'), QIcon(':file_sm_cut')
-            for item in items:
-                pathType = self.model.index(item.row(), 1, item.parent()).data()
-                icon = folderCutIcon if pathType == 'Folder' else fileCutIcon
-                self.model.itemFromIndex(item).setIcon(icon)
-            self.listDirectories()
-        self.pasteFileAction.setEnabled(True)
-        self.statusBar.showMessage('File copied to clipboard!', 3000)
-
-    def overwriteFileDialog(self, duplicates):
-        msgBox = QMessageBox()
-        msgBox.setIcon(QMessageBox.Warning)
-        if len(duplicates) > 1:
-            msgText = f"Do you want to overwrite {len(duplicates)} files?"
-        else:
-            msgText = f"Do you want to overwrite '{duplicates[0].name}'?"
-        msgBox.setText(msgText)
-        msgBox.setWindowTitle("Confirm overwrite")
-        msgBox.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
-
-        return msgBox.exec()
-
-    def pasteFile(self):
-        if self.fileClipboard:
-            cut = self.fileClipboard.pop()
-            filenames = [x.name for x in self.fileClipboard]
-            destPaths = [self.currPath.joinpath(x) for x in filenames]
-            try:
-                duplicates = []
-                for src, dest in zip(self.fileClipboard, destPaths):
-                    if src == dest:
-                        raise shutil.SameFileError
-                    if dest in self.currPath.glob('*'):
-                        duplicates.append(dest)
-                if duplicates:
-                    if self.overwriteFileDialog(duplicates) == QMessageBox.Cancel:
-                        self.fileClipboard.clear()
-                        self.pasteFileAction.setEnabled(False)
-                        return
-                for src, dest in zip(self.fileClipboard, destPaths):
-                    if cut and src.is_file():
-                        shutil.move(str(src), str(dest))
-                    elif src.is_dir():
-                        dir_util.copy_tree(str(src), str(dest))
-                        if cut:
-                            shutil.rmtree(src)
-                    elif src.is_file():
-                        shutil.copy(str(src), str(dest))
-                    elif not src.exists():
-                        raise FileNotFoundError
-                self.statusBar.showMessage('File pasted!', 3000)
-                self.fileClipboard.clear()
-                self.pasteFileAction.setEnabled(False)
-            except shutil.SameFileError:
-                self.statusBar.showMessage('You cannot overwrite the same file!', 3000)
-                self.fileClipboard.clear()
-            except PermissionError:
-                self.statusBar.showMessage('No permission to copy the file!', 3000)
-                self.fileClipboard.clear()
-            except FileNotFoundError:
-                self.statusBar.showMessage('Cannot find the source file!', 3000)
-                self.fileClipboard.clear()
-            finally:
-                self.listDirectories()
+    def _goUp(self) -> None:
+        """
+        Goes one directory up
+        """
+        self._openPath(path=self._currPath.parent)
 
 
 def main():
