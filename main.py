@@ -1,3 +1,5 @@
+# camelCase to be consistent with PyQt naming convention
+
 import datetime as dt
 import subprocess
 import shutil
