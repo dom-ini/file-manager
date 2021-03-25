@@ -880,7 +880,7 @@ class FileManager(QMainWindow):
         # sort by column combobox
         sortLabel = QLabel('Sort by:')
         sortComboBox = QComboBox()
-        sortComboBox.addItems(self._modelHeaders)
+        sortComboBox.addItems(self._modelHeaders[:4])
 
         # order choosing radio buttons
         orderLabel = QLabel('Order:')
