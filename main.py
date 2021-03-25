@@ -21,10 +21,15 @@ if os.name == 'nt':
 
 
 class CustTreeView(QTreeView):
+    """
+    Custom class for PyQt TreeView
+    """
     itemDropped = pyqtSignal(QPoint, list)
 
     def mousePressEvent(self, e: QMouseEvent) -> None:
         colPos = self.columnAt(e.pos().x())
+
+        # if LMB is pressed and mouse cursor is over empty space
         if (QApplication.mouseButtons() == Qt.LeftButton and not self.indexAt(e.pos()).siblingAtColumn(0).data()) \
                 or colPos == 4:
             self.setDragEnabled(False)
@@ -33,6 +38,8 @@ class CustTreeView(QTreeView):
             self.rubberBand.setGeometry(QRect(self.origin, QSize()))
             self.rubberBand.show()
         editor = self.indexWidget(self.currentIndex().siblingAtColumn(0))
+
+        # if editor of any item is opened, close it on mouse click
         if editor:
             self.commitData(editor)
             self.closeEditor(editor, QAbstractItemDelegate.SubmitModelCache)
@@ -40,10 +47,15 @@ class CustTreeView(QTreeView):
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
-        if hasattr(self, 'origin') and not QApplication.keyboardModifiers() == Qt.ControlModifier and (
-                (not self.indexAt(e.pos()).siblingAtColumn(0).data() and e.pos().y() > 0)
-                and not self.indexAt(self.origin).siblingAtColumn(0).data()):
+        ctrlPressed = QApplication.keyboardModifiers() == Qt.ControlModifier
+        mouseOverItem = bool(self.indexAt(e.pos()).siblingAtColumn(0).data())
+        originOverItem = bool(hasattr(self, 'origin') and self.indexAt(self.origin).siblingAtColumn(0).data())
+
+        # clears selection if box selection doesn't contain any item and CTRL is not pressed
+        if not ctrlPressed and ((not mouseOverItem and e.pos().y() > 0) and not originOverItem):
             self.clearSelection()
+
+        # update box selection position
         if QApplication.mouseButtons() == Qt.LeftButton and hasattr(self, 'rubberBand'):
             pos = QPoint(e.pos().x(), max(e.pos().y() + self.header().height(), self.header().height()))
             self.rubberBand.setGeometry(QRect(self.origin, pos).normalized())
@@ -66,8 +78,11 @@ class CustTreeView(QTreeView):
 
 
 class FileManager(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    """
+    Custom class for PyQt MainWindow
+    """
+    def __init__(self, flags=None):
+        super().__init__(flags=flags)
         self.setWindowTitle('File Manager')
         self.setWindowIcon(QIcon(':folder.png'))
         self.setMinimumSize(800, 600)
