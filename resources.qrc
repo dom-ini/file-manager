@@ -1,0 +1,28 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file alias="copy_file.png">img/copy_file.png</file>
+    <file alias="copy_path.png">img/copy_path.png</file>
+    <file alias="paste.png">img/paste.png</file>
+    <file alias="cut.png">img/cut.png</file>
+    <file alias="delete.png">img/delete.png</file>
+    <file alias="exit.png">img/exit.png</file>
+    <file alias="new_file.png">img/new_file.png</file>
+    <file alias="new_folder.png">img/new_folder.png</file>
+    <file alias="open.png">img/open.png</file>
+    <file alias="rename.png">img/rename.png</file>
+    <file alias="file.png">img/file.png</file>
+    <file alias="file_sm.png">img/file_sm.png</file>
+    <file alias="file_sm_cut.png">img/file_sm_cut.png</file>
+    <file alias="folder.png">img/folder.png</file>
+    <file alias="folder_sm.png">img/folder_sm.png</file>
+    <file alias="folder_sm_cut.png">img/folder_sm_cut.png</file>
+    <file alias="undo.png">img/undo.png</file>
+    <file alias="redo.png">img/redo.png</file>
+    <file alias="go_up.png">img/go_up.png</file>
+    <file alias="go_forward.png">img/go_forward.png</file>
+    <file alias="go_back.png">img/go_back.png</file>
+    <file alias="refresh.png">img/refresh.png</file>
+    <file alias="sort.png">img/sort.png</file>
+    <file alias="bulk_rename.png">img/bulk_rename.png</file>
+</qresource>
+</RCC>
