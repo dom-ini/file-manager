@@ -1,10 +1,10 @@
 # file-manager
 Simple file manager built with PyQt5. Python 3.8.3. Tested on Windows and Linux.
 
-# Dependencies
+## Dependencies
 The required libraries are: PyQt5, pyperclip and (if using Windows) pywin32.
 
-# Main Features
+## Main Features
 - Creating new files and directories,
 - Navigation: step back, step forward and directory up,
 - Copy, copy as path, cut, paste, rename, delete,
